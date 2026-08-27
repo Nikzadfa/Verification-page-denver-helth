@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/session';
 import { getEntitlements } from '@/lib/billing/entitlements';
 import { jobSchema } from '@/lib/api/schemas';
+import { findOrCreateCustomer, getScopedCustomer } from '@/lib/customers/service';
 import { fail, handle, ok } from '@/lib/api/respond';
 
 export const dynamic = 'force-dynamic';
@@ -17,7 +18,7 @@ export const GET = handle(async () => {
     orderBy: { updatedAt: 'desc' },
     take: 100,
     include: {
-      customer: { select: { name: true, address: true } },
+      customer: { select: { id: true, name: true, address: true, phone: true } },
       _count: { select: { diagnosticSessions: true, reports: true } },
     },
   });
@@ -37,15 +38,21 @@ export const POST = handle(async (request: NextRequest) => {
 
   const body = jobSchema.parse(await request.json());
 
+  // An existing customer wins over typed-in details; otherwise the name is
+  // matched against the book so a repeat visit lands on the same record
+  // instead of creating a second copy of the same house.
   let customerId: string | null = null;
-  if (body.customerName?.trim()) {
-    const customer = await prisma.customer.create({
-      data: {
-        companyId: user.companyId,
-        name: body.customerName.trim(),
-        phone: body.customerPhone?.trim() || null,
-        address: body.customerAddress?.trim() || null,
-      },
+  if (body.customerId) {
+    const existing = await getScopedCustomer(user, body.customerId);
+    if (!existing) {
+      return fail('That customer does not exist, or belongs to another account.', 404, 'not_found');
+    }
+    customerId = existing.id;
+  } else if (body.customerName?.trim()) {
+    const customer = await findOrCreateCustomer(user, {
+      name: body.customerName,
+      phone: body.customerPhone ?? null,
+      address: body.customerAddress ?? null,
     });
     customerId = customer.id;
   }

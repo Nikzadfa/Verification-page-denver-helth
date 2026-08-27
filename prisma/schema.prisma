@@ -66,6 +66,7 @@ model User {
   subscription       Subscription?
   diagnosticSessions DiagnosticSession[]
   jobs               Job[]
+  customers          Customer[]          @relation("CustomerOwner")
   reports            ServiceReport[]
   photos             Photo[]
   uploadedDocuments  KnowledgeDocument[]
@@ -127,6 +128,15 @@ model Customer {
   companyId String?
   company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
+  /// The technician who created the record.
+  ///
+  /// A solo technician signs up without a company, so companyId is null for
+  /// them. Scoping customers by companyId alone would therefore put every
+  /// unaffiliated technician's customers in one shared bucket. Ownership is
+  /// what makes a customer list private when there is no company to belong to.
+  ownerUserId String?
+  ownerUser   User?   @relation("CustomerOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+
   name    String
   phone   String?
   email   String?
@@ -143,6 +153,7 @@ model Customer {
   equipment Equipment[]
 
   @@index([companyId, name])
+  @@index([ownerUserId, name])
 }
 
 enum JobStatus {
@@ -774,6 +785,14 @@ model Subscription {
 
   stripeCustomerId     String?
   stripeSubscriptionId String? @unique
+
+  /// Apple In-App Purchase. An iOS subscriber is billed by Apple, not Stripe,
+  /// so the two provider columns are mutually exclusive in practice. The
+  /// original transaction id is the stable identity Apple uses across renewals
+  /// and is what a server notification arrives keyed on.
+  appleOriginalTransactionId String? @unique
+  appleProductId             String?
+  appleEnvironment           String?
 
   currentPeriodStart DateTime @default(now())
   currentPeriodEnd   DateTime?

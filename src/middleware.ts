@@ -13,15 +13,27 @@ import { SESSION_COOKIE, readEdgeSession } from '@/lib/auth/edge';
  * downstream, which is what keeps session revocation immediate.
  */
 
-const PUBLIC_PATHS = ['/login', '/register'];
+/** Sign-in pages: open to strangers, pointless once you are signed in. */
+const AUTH_PATHS = ['/login', '/register'];
+
+/**
+ * Open to everyone, signed in or not.
+ *
+ * The privacy policy and support pages have to be reachable without an
+ * account: App Store Connect requires public URLs for both, and a reviewer
+ * opens them before they ever create a login.
+ */
+const OPEN_PATHS = ['/legal'];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const startsWith = (p: string) => pathname === p || pathname.startsWith(`${p}/`);
 
   const claims = await readEdgeSession(request.cookies.get(SESSION_COOKIE)?.value);
-  const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+  const isAuthPage = AUTH_PATHS.some(startsWith);
+  const isOpen = isAuthPage || OPEN_PATHS.some(startsWith);
 
-  if (!claims && !isPublic) {
+  if (!claims && !isOpen) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     // Come back to where they were trying to go once they sign in.
@@ -30,7 +42,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // Signed-in users have no reason to see the sign-in page.
-  if (claims && isPublic) {
+  if (claims && isAuthPage) {
     const url = request.nextUrl.clone();
     url.pathname = '/';
     url.search = '';

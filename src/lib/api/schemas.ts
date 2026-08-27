@@ -89,11 +89,27 @@ export const decodeSchema = z.object({
 export const jobSchema = z.object({
   title: z.string().min(2).max(160),
   complaint: z.string().max(4000).optional(),
+  /** An existing customer. Takes precedence over the typed-in fields below. */
+  customerId: z.string().uuid().nullish(),
   customerName: z.string().max(160).optional(),
   customerPhone: z.string().max(40).optional(),
   customerAddress: z.string().max(240).optional(),
   jobNumber: z.string().max(60).optional(),
 });
+
+export const customerSchema = z.object({
+  name: z.string().min(2, 'A customer needs a name to file the job under.').max(160),
+  phone: z.string().max(40).optional(),
+  email: z.string().email('That does not look like an email address.').max(200).optional().or(z.literal('')),
+  address: z.string().max(240).optional(),
+  city: z.string().max(80).optional(),
+  state: z.string().max(40).optional(),
+  postal: z.string().max(20).optional(),
+  notes: z.string().max(4000).optional(),
+});
+
+/** Every field optional — a PATCH changes only what it names. */
+export const customerPatchSchema = customerSchema.partial();
 
 export const reportSchema = z.object({
   sessionId: z.string().uuid(),

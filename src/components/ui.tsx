@@ -310,7 +310,7 @@ export function SignOutButton() {
   return (
     <button
       type="button"
-      className="tr-btn tr-btn-ghost text-sm"
+      className="tr-btn tr-btn-secondary w-full text-sm"
       onClick={async () => {
         await fetch('/api/auth/logout', { method: 'POST' });
         router.push('/login');

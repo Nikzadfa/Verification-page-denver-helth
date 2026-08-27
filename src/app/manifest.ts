@@ -17,6 +17,13 @@ export default function manifest(): MetadataRoute.Manifest {
     background_color: '#0b1116',
     theme_color: '#0b1116',
     categories: ['productivity', 'utilities'],
-    icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' }],
+    icons: [
+      { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' },
+      // Android's install prompt requires a 192 and a 512 raster icon; the SVG
+      // alone is not enough for it to offer "Add to home screen".
+      { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+      { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    ],
   };
 }

@@ -3,20 +3,21 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth/session';
 import { getEntitlements } from '@/lib/billing/entitlements';
 import { prisma } from '@/lib/db';
-import { AppHeader, SignOutButton } from '@/components/ui';
+import { AppHeader } from '@/components/ui';
 
 export const dynamic = 'force-dynamic';
 
 const TILES = [
   { href: '/diagnose/new', icon: '🔧', label: 'Diagnose', hint: 'Start a guided diagnosis' },
   { href: '/fault-codes', icon: '⚠️', label: 'Fault Codes', hint: 'Manufacturer code lookup' },
+  { href: '/customers', icon: '👥', label: 'Customers', hint: 'Contacts, sites and history' },
   { href: '/scan', icon: '📷', label: 'Scan Equipment', hint: 'Read a rating plate' },
   { href: '/tools/electrical', icon: '⚡', label: 'Electrical', hint: 'Capacitor, amps, voltage' },
   { href: '/tools/refrigeration', icon: '❄️', label: 'Refrigeration', hint: 'Superheat, subcooling, P/T' },
   { href: '/tools/heating', icon: '🔥', label: 'Heating', hint: 'Rise, gas input, ignition' },
   { href: '/tools/airflow', icon: '💨', label: 'Airflow', hint: 'Static pressure, CFM, ΔT' },
   { href: '/reports', icon: '📋', label: 'Service Reports', hint: 'Generate and export PDFs' },
-  { href: '/jobs', icon: '🗂', label: 'Saved Jobs', hint: 'Customers and job history' },
+  { href: '/jobs', icon: '🗂', label: 'Saved Jobs', hint: 'Work in progress by job' },
 ];
 
 export default async function Home() {
@@ -42,7 +43,14 @@ export default async function Home() {
 
   return (
     <div className="mx-auto min-h-dvh max-w-3xl pb-10">
-      <AppHeader title="ThermoRivet" right={<SignOutButton />} />
+      <AppHeader
+        title="ThermoRivet"
+        right={
+          <Link href="/account" className="tr-btn tr-btn-ghost text-sm" aria-label="Account">
+            Account
+          </Link>
+        }
+      />
 
       <main className="px-3 pt-4">
         <p className="mb-4 text-sm" style={{ color: 'var(--text-muted)' }}>

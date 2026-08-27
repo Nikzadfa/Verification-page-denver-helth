@@ -6,8 +6,14 @@ import { prisma } from '@/lib/db';
 import { isStripeConfigured } from '@/lib/billing/stripe';
 import { AppHeader, Card } from '@/components/ui';
 import { UpgradeButton } from '@/components/UpgradeButton';
+import { WebOnly } from '@/components/WebOnly';
 
 export const dynamic = 'force-dynamic';
+
+/** Whole dollars stay whole: "$29", not "$29.00". */
+function formatPrice(cents: number): string {
+  return cents % 100 === 0 ? `$${cents / 100}` : `$${(cents / 100).toFixed(2)}`;
+}
 
 export default async function PricingPage() {
   const user = await getCurrentUser();
@@ -42,12 +48,14 @@ export default async function PricingPage() {
         )}
 
         {!stripeReady && (
-          <Card>
-            <p className="text-sm" style={{ color: 'var(--color-warn-400)' }}>
-              Self-service checkout is not enabled on this deployment. Plans and limits still
-              apply; an administrator changes them from the admin dashboard.
-            </p>
-          </Card>
+          <WebOnly>
+            <Card>
+              <p className="text-sm" style={{ color: 'var(--color-warn-400)' }}>
+                Self-service checkout is not enabled on this deployment. Plans and limits still
+                apply; an administrator changes them from the admin dashboard.
+              </p>
+            </Card>
+          </WebOnly>
         )}
 
         {plans.map((plan) => {
@@ -64,12 +72,20 @@ export default async function PricingPage() {
                   )}
                 </div>
                 <div className="shrink-0 text-right">
-                  <span className="font-mono text-xl font-bold">
-                    ${(plan.priceCentsMonthly / 100).toFixed(2)}
+                  <span className="font-mono text-xl font-bold tabular-nums">
+                    {formatPrice(plan.priceCentsMonthly)}
                   </span>
                   <span className="block text-xs" style={{ color: 'var(--text-dim)' }}>
                     per month
                   </span>
+                  {plan.priceCentsYearly !== null && plan.priceCentsYearly > 0 && (
+                    <span className="mt-1 block text-xs" style={{ color: 'var(--text-dim)' }}>
+                      {formatPrice(plan.priceCentsYearly)}/year
+                      {plan.priceCentsYearly < plan.priceCentsMonthly * 12 && (
+                        <> · save {formatPrice(plan.priceCentsMonthly * 12 - plan.priceCentsYearly)}</>
+                      )}
+                    </span>
+                  )}
                 </div>
               </div>
 
