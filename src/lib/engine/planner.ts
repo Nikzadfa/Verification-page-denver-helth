@@ -44,6 +44,12 @@ function isApplicable(test: DiagnosticTest, state: EngineState): boolean {
   if (test.requires?.length && !test.requires.some((r) => present.has(r))) return false;
   if (test.blockedBy?.length && test.blockedBy.some((b) => present.has(b))) return false;
 
+  // Trade sequencing rules that information gain alone will not produce.
+  if (test.prerequisiteTestIds?.length) {
+    const done = new Set([...state.askedTestIds, ...state.skippedTestIds]);
+    if (!test.prerequisiteTestIds.every((id) => done.has(id))) return false;
+  }
+
   return true;
 }
 
@@ -131,12 +137,44 @@ export function planNextTests(
   opts: PlanOptions,
 ): PlannedTest[] {
   const baseline = entropyBits(scores);
+  /**
+   * Tests are ranked on expected DECISIVENESS — how far the leading
+   * hypothesis's probability moves — rather than on Shannon entropy.
+   *
+   * Entropy over the full distribution rewards a test that carves up the
+   * low-probability tail just as much as one that settles the actual question.
+   * In practice that sent the engine off measuring subcooling on a unit that
+   * was humming and not turning, because subcooling touches many hypotheses,
+   * while the run capacitor sat untested. Decisiveness is far less sensitive to
+   * the tail and matches what the technician needs: get to an answer.
+   *
+   * Entropy is still computed and reported, because "how much did this test
+   * actually tell us" is the right thing to show and the right thing for the
+   * stopping rule to threshold on.
+   */
+  const baselineDecisiveness = decisiveness(scores);
   const applicable = TESTS.filter((t) => isApplicable(t, state));
   const planned: PlannedTest[] = [];
+
+  /**
+   * Confirming a hypothesis that already leads carries little information gain
+   * by definition — the ranking barely moves. But the stopping rule refuses to
+   * conclude without a confirming test, so without a correction the planner
+   * would wander through progressively less relevant checks while never
+   * running the one test that closes the case. Once a hypothesis is clearly in
+   * front, its confirming tests get priority.
+   */
+  const leader = scores.find((s) => !s.ruledOut);
+  const confirmingIds = new Set<string>(
+    leader && leader.posterior >= 0.45
+      ? (HYPOTHESIS_MAP[leader.hypothesisId]?.confirmedBy ?? [])
+      : [],
+  );
 
   for (const test of applicable) {
     const outcomes = enumerateOutcomes(test, scores);
     let expectedPosteriorEntropy = 0;
+    let expectedDecisiveness = 0;
 
     for (const outcome of outcomes) {
       if (outcome.probability <= 1e-6) continue;
@@ -146,22 +184,38 @@ export function planNextTests(
       ];
       const posterior = rankHypotheses(hypotheticalFindings, opts);
       expectedPosteriorEntropy += outcome.probability * entropyBits(posterior);
+      expectedDecisiveness += outcome.probability * decisiveness(posterior);
     }
 
     const gain = Math.max(0, baseline - expectedPosteriorEntropy);
-    const score = gain / costTerm(test);
+    const decisivenessGain = Math.max(0, expectedDecisiveness - baselineDecisiveness);
+    const confirming = confirmingIds.has(test.id);
+    // The bonus is additive rather than multiplicative so it still lifts a
+    // confirming test whose computed gain has collapsed to nearly zero.
+    const score = (decisivenessGain + (confirming ? 0.25 : 0)) / costTerm(test);
 
     planned.push({
       test,
       expectedInfoGainBits: round3(gain),
       score: round4(score),
-      rationale: buildRationale(test, scores, gain),
+      rationale: confirming
+        ? `${leader!.label} is clearly in front. This is the test that confirms it directly, rather than inferring it from the readings so far.`
+        : buildRationale(test, scores, gain),
       separates: topSeparated(test, scores),
     });
   }
 
   planned.sort((a, b) => b.score - a.score);
   return planned.slice(0, opts.limit ?? 5);
+}
+
+/** Probability of the leading hypothesis — how close the engine is to an answer. */
+function decisiveness(scores: HypothesisScore[]): number {
+  let max = 0;
+  for (const s of scores) {
+    if (!s.ruledOut && s.posterior > max) max = s.posterior;
+  }
+  return max;
 }
 
 function topSeparated(test: DiagnosticTest, scores: HypothesisScore[]): string[] {

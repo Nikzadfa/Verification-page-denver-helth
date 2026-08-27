@@ -64,7 +64,14 @@ export const HYPOTHESES: Hypothesis[] = [
       low_pressure_switch_open: 'FOR',
       evaporator_iced: 'WEAK_FOR',
       subcooling_high: 'STRONG_AGAINST',
-      pattern_high_sh_high_sc: 'STRONG_AGAINST',
+      // A starved evaporator with liquid stacking in the condenser is not a
+      // system that is short of refrigerant — you cannot stack liquid you do
+      // not have. This pattern is physically incompatible with an undercharge,
+      // and it is the single most consequential discrimination on the
+      // refrigerant side: adding refrigerant to a restricted system makes it
+      // worse and costs the customer a charge they did not need.
+      pattern_high_sh_high_sc: 'RULES_OUT',
+      restriction_across_drier: 'STRONG_AGAINST',
       pattern_charge_normal: 'RULES_OUT',
       leak_not_found: 'WEAK_AGAINST',
       static_pressure_high: 'WEAK_AGAINST',
@@ -307,14 +314,14 @@ export const HYPOTHESES: Hypothesis[] = [
   },
   {
     id: 'condenser-fan-failure',
-    label: 'Condenser fan motor or capacitor failure',
+    label: 'Condenser fan motor failure',
     category: 'electrical',
     statement:
-      'The outdoor fan is not moving rated air — failed motor, failed capacitor, or a seized bearing.',
+      'The outdoor fan motor itself has failed — an open winding or a seized bearing. As with the compressor, a failed run capacitor produces the same symptom on a healthy motor, so a bad capacitor argues against the motor being at fault.',
     equipmentTypes: 'ANY',
     families: ['insufficient_cooling', 'no_cooling', 'short_cycling'],
     prior: 0.09,
-    confirmedBy: ['observe-condenser-fan', 'capacitor-test'],
+    confirmedBy: ['observe-condenser-fan'],
     confusedWith: [
       {
         hypothesisId: 'dirty-condenser',
@@ -331,14 +338,17 @@ export const HYPOTHESES: Hypothesis[] = [
         'A fan motor that failed from heat is often a symptom of a coil that was never cleaned. Check the coil while you are there.',
     },
     evidence: {
-      condenser_fan_not_running: 'PATHOGNOMONIC',
-      capacitor_failed: 'STRONG_FOR',
-      capacitor_out_of_tolerance: 'FOR',
+      condenser_fan_not_running: 'STRONG_FOR',
+      // The capacitor is the cheaper explanation for a stopped fan, and it is
+      // a separate hypothesis. A confirmed bad capacitor points there, not at
+      // the motor.
+      capacitor_failed: 'AGAINST',
+      capacitor_out_of_tolerance: 'WEAK_AGAINST',
+      capacitor_ok: 'FOR',
       condenser_split_high: 'FOR',
       high_pressure_switch_open: 'FOR',
-      motor_locked_rotor: 'STRONG_FOR',
+      motor_locked_rotor: 'WEAK_FOR',
       condenser_fan_running: 'STRONG_AGAINST',
-      capacitor_ok: 'WEAK_AGAINST',
     },
   },
   {
@@ -379,7 +389,13 @@ export const HYPOTHESES: Hypothesis[] = [
       superheat_high: 'WEAK_FOR',
       compressor_running: 'FOR',
       delta_t_low: 'FOR',
-      pattern_charge_normal: 'WEAK_AGAINST',
+      // A compressor that is pumping normally is not a compressor that has
+      // stopped pumping. Without these, normal readings leave the hypothesis
+      // floating near the top on its prior alone.
+      compressor_amps_normal: 'STRONG_AGAINST',
+      superheat_normal: 'AGAINST',
+      subcooling_normal: 'AGAINST',
+      pattern_charge_normal: 'STRONG_AGAINST',
       motor_amps_high: 'AGAINST',
       leak_found: 'AGAINST',
     },
@@ -426,10 +442,10 @@ export const HYPOTHESES: Hypothesis[] = [
   },
   {
     id: 'compressor-locked-rotor',
-    label: 'Compressor locked rotor',
+    label: 'Compressor mechanically seized',
     category: 'electrical',
     statement:
-      'The compressor is being energized but the rotor will not turn — it hums, draws LRA, and trips on its internal overload.',
+      'The compressor is being energized with good start components and the rotor still will not turn — it hums, draws LRA, and trips on its internal overload. This is the hypothesis for a mechanically seized compressor, which is why a failed run capacitor argues against it rather than for it: a bad capacitor produces the identical symptom on a compressor that is not seized at all.',
     equipmentTypes: 'ANY',
     families: ['no_cooling', 'unit_not_running'],
     prior: 0.04,
@@ -449,11 +465,17 @@ export const HYPOTHESES: Hypothesis[] = [
       rootCauseWarning:
         'A hard-start kit that gets a seized compressor running is a diagnostic step, not a repair. Say so in the report.',
     },
+    requiresEvidence: ['motor_locked_rotor'],
     evidence: {
-      motor_locked_rotor: 'PATHOGNOMONIC',
-      capacitor_failed: 'FOR',
-      breaker_tripped: 'FOR',
-      outdoor_unit_not_running: 'FOR',
+      motor_locked_rotor: 'STRONG_FOR',
+      // A failed capacitor explains locked-rotor amps without the compressor
+      // being seized, so it argues against seizure being the root cause. This
+      // sign is the difference between a $30 part and a $2,000 one.
+      capacitor_failed: 'STRONG_AGAINST',
+      capacitor_out_of_tolerance: 'AGAINST',
+      capacitor_ok: 'FOR',
+      breaker_tripped: 'WEAK_FOR',
+      outdoor_unit_not_running: 'WEAK_FOR',
       winding_ok: 'WEAK_FOR',
       compressor_running: 'RULES_OUT',
     },
@@ -853,6 +875,11 @@ export const HYPOTHESES: Hypothesis[] = [
       no_24v_at_w: 'STRONG_FOR',
       outdoor_unit_not_running: 'WEAK_FOR',
       control_voltage_ok: 'WEAK_FOR',
+      // Equipment that is running was told to run. A thermostat fault cannot
+      // explain a system that is energized and operating.
+      compressor_running: 'RULES_OUT',
+      blower_running: 'AGAINST',
+      condenser_fan_running: 'AGAINST',
     },
   },
   {

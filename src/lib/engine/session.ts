@@ -326,7 +326,14 @@ function buildConclusion(scores: HypothesisScore[], state: EngineState): Conclus
  */
 const FAMILY_PATTERNS: Array<{ family: SymptomFamily; re: RegExp }> = [
   { family: 'no_cooling', re: /\b(no cool|not cool|won'?t cool|no a\/?c|blowing warm|blowing hot)/i },
-  { family: 'insufficient_cooling', re: /\b(not cooling enough|can'?t keep up|not cold enough|barely cool|struggl|warm(er)? than set)/i },
+  {
+    family: 'insufficient_cooling',
+    // "Not cooling as well as it used to" is degradation, not total failure.
+    // Reading it as total failure excludes the explanations that only apply to
+    // a system that still works — including "the equipment is fine and the
+    // load changed", which is sometimes the correct answer.
+    re: /\b(not cooling enough|can'?t keep up|not cold enough|barely cool|struggl|warm(er)? than set|as well as it used to|not as (cold|cool)|less cool|used to (be )?(cold|cool)|degrad|weak(er)? cool)/i,
+  },
   { family: 'no_heat', re: /\b(no heat|not heating|won'?t heat|no furnace|cold air on heat)/i },
   { family: 'insufficient_heat', re: /\b(not enough heat|not warm enough|can'?t keep up.*heat)/i },
   { family: 'no_airflow', re: /\b(no air|weak air|low airflow|blower (not|won'?t) )/i },

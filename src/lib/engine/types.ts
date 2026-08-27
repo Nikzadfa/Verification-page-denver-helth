@@ -155,6 +155,13 @@ export interface DiagnosticTest {
   requires?: string[];
   /** Do not offer this test if any of these findings is present. */
   blockedBy?: string[];
+  /**
+   * Tests that must have been run first. This encodes trade sequencing rules
+   * that are not derivable from information gain — above all "test the run
+   * capacitor before you go anywhere near condemning the compressor", which is
+   * the most expensive avoidable misdiagnosis in residential service.
+   */
+  prerequisiteTestIds?: string[];
 }
 
 export interface HypothesisScore {
