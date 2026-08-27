@@ -196,7 +196,15 @@ function ScanResult({ result }: { result: ScanResponse }) {
 
       {a.modelNumber.legible && (
         <Link
-          href={`/diagnose/new?model=${encodeURIComponent(a.modelNumber.value ?? '')}`}
+          href={`/diagnose/new?${new URLSearchParams(
+            Object.entries({
+              model: a.modelNumber.value ?? '',
+              serial: a.serialNumber.legible ? (a.serialNumber.value ?? '') : '',
+              manufacturer: a.manufacturer.legible ? (a.manufacturer.value ?? '') : '',
+              refrigerant: a.refrigerant.legible ? (a.refrigerant.value ?? '') : '',
+              board: a.controlBoard.legible ? (a.controlBoard.value ?? '') : '',
+            }).filter(([, v]) => v),
+          ).toString()}`}
           className="tr-btn tr-btn-primary w-full"
         >
           Start a diagnosis on this unit

@@ -1,7 +1,7 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useState } from 'react';
 import { EquipmentType } from '@prisma/client';
 import { ApiError, AppHeader, Card, ErrorNote, Spinner, api } from '@/components/ui';
 import { VoiceInput } from '@/components/VoiceInput';
@@ -34,22 +34,35 @@ const MANUFACTURERS = [
   'Amana', 'Rheem', 'Ruud', 'York', 'Daikin', 'Mitsubishi Electric',
 ];
 
-export default function NewDiagnosisPage() {
+function NewDiagnosisForm() {
   const router = useRouter();
+  const params = useSearchParams();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showDetails, setShowDetails] = useState(false);
+
+  // Arriving from a scan or a fault-code lookup: prefill what is already known
+  // and open the details panel so the technician can see it was carried over
+  // rather than wondering whether it was lost.
+  const prefilled = {
+    modelNumber: params.get('model') ?? '',
+    serialNumber: params.get('serial') ?? '',
+    manufacturer: params.get('manufacturer') ?? '',
+    faultCode: params.get('code') ?? '',
+  };
+  const hasPrefill = Object.values(prefilled).some(Boolean);
+
+  const [showDetails, setShowDetails] = useState(hasPrefill);
   const [form, setForm] = useState({
     complaint: '',
-    equipmentType: 'UNKNOWN' as EquipmentType,
-    manufacturer: '',
-    modelNumber: '',
-    serialNumber: '',
-    controlBoard: '',
-    refrigerant: '',
+    equipmentType: (params.get('equipmentType') as EquipmentType | null) ?? ('UNKNOWN' as EquipmentType),
+    manufacturer: prefilled.manufacturer,
+    modelNumber: prefilled.modelNumber,
+    serialNumber: prefilled.serialNumber,
+    controlBoard: params.get('board') ?? '',
+    refrigerant: params.get('refrigerant') ?? '',
     meteringDevice: 'UNKNOWN',
     mode: 'UNKNOWN',
-    faultCode: '',
+    faultCode: prefilled.faultCode,
   });
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
@@ -271,5 +284,19 @@ export default function NewDiagnosisPage() {
         </button>
       </form>
     </div>
+  );
+}
+
+export default function NewDiagnosisPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="mx-auto max-w-2xl px-3 py-4">
+          <Spinner label="Loading" />
+        </div>
+      }
+    >
+      <NewDiagnosisForm />
+    </Suspense>
   );
 }
