@@ -9,11 +9,30 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join, normalize, resolve, sep } from 'node:path';
 import { GetObjectCommand, PutObjectCommand, DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
-const LOCAL_ROOT = resolve(process.cwd(), '.storage');
+/**
+ * Where the local driver writes.
+ *
+ * A serverless filesystem is read-only apart from the temp directory, so a
+ * deployment without S3 configured would otherwise fail on the first upload.
+ * Falling back to the temp directory keeps the app usable there, but the files
+ * do NOT survive a cold start — which is fine for evaluating the app and is
+ * exactly why S3 exists for real use. `storageIsEphemeral()` lets callers say
+ * so rather than letting a technician assume a photo was kept.
+ */
+const IS_SERVERLESS = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const LOCAL_ROOT = IS_SERVERLESS
+  ? join(tmpdir(), 'thermorivet-storage')
+  : resolve(process.cwd(), '.storage');
+
+/** True when uploads are being kept somewhere that will not survive a restart. */
+export function storageIsEphemeral(): boolean {
+  return driver() === 'local' && IS_SERVERLESS;
+}
 
 export type StorageDriver = 's3' | 'local';
 

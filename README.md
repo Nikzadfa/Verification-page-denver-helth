@@ -129,13 +129,22 @@ instead.
 
 ## Running it
 
+**On a phone, or without a terminal:** see [DEPLOY.md](DEPLOY.md). It walks
+through Neon + Vercel from a phone browser in about five minutes, and the
+deploy migrates and seeds itself.
+
+**Locally**, with Node 20+ and Docker:
+
 ```bash
 npm install
-cp .env.example .env          # set DATABASE_URL and AUTH_SECRET at minimum
-npx prisma migrate deploy     # needs PostgreSQL 15+ with the vector extension
-npm run db:seed
+npm run db:up      # PostgreSQL 16 + pgvector
+npm run setup      # writes .env with a generated AUTH_SECRET, migrates, seeds
+npm run db:demo    # optional: admin account with a worked diagnosis already in it
 npm run dev
 ```
+
+`npm run db:demo` prints its credentials. If you already have PostgreSQL 15+
+with the `vector` extension, skip `db:up` and point `DATABASE_URL` at it.
 
 `ANTHROPIC_API_KEY` is optional. Without it the engine works fully; free-text
 understanding, narration and photo analysis fall back or degrade with a clear

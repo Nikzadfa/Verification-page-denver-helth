@@ -19,7 +19,8 @@
     "setup": "node scripts/setup.mjs",
     "db:demo": "tsx prisma/seed/demo.ts",
     "db:up": "docker compose up -d",
-    "db:down": "docker compose down"
+    "db:down": "docker compose down",
+    "vercel-build": "prisma generate && prisma migrate deploy && tsx prisma/seed.ts && next build"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
