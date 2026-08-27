@@ -224,10 +224,14 @@ export class QuotaExceededError extends Error {
   }
 }
 
-export async function assertCanStartDiagnosis(userId: string): Promise<void> {
+/**
+ * Claims a diagnosis against the quota. Call this INSTEAD of checking and then
+ * recording separately — the two-step version let concurrent requests overrun
+ * the limit.
+ */
+export async function claimDiagnosis(userId: string): Promise<void> {
   const ent = await getEntitlements(userId);
-  if (ent.diagnosesRemaining === 'unlimited') return;
-  if (ent.diagnosesRemaining > 0) return;
+  if (await claimUsage(userId, 'diagnosis')) return;
   throw new QuotaExceededError(
     `You have used all ${ent.planName} diagnoses for this period. Upgrade to Pro for unlimited diagnoses.`,
     'diagnoses',
@@ -235,7 +239,11 @@ export async function assertCanStartDiagnosis(userId: string): Promise<void> {
   );
 }
 
-export async function assertCanAnalyzePhoto(userId: string): Promise<void> {
+/**
+ * Claims a photo analysis against the quota. Like claimDiagnosis, this is a
+ * single atomic step rather than a check followed by an increment.
+ */
+export async function claimPhotoAnalysis(userId: string): Promise<void> {
   const ent = await getEntitlements(userId);
   if (!ent.photoAnalysis) {
     throw new QuotaExceededError(
@@ -244,7 +252,7 @@ export async function assertCanAnalyzePhoto(userId: string): Promise<void> {
       'PRO',
     );
   }
-  if (ent.photosRemaining !== 'unlimited' && ent.photosRemaining <= 0) {
+  if (!(await claimUsage(userId, 'photo'))) {
     throw new QuotaExceededError('Photo analysis quota used for this period.', 'photoAnalysis', 'PRO');
   }
 }
@@ -265,15 +273,63 @@ export async function recordUsage(
   userId: string,
   kind: 'diagnosis' | 'photo',
 ): Promise<void> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { subscription: { select: { id: true } }, company: { select: { subscription: { select: { id: true } } } } },
-  });
-  const subscriptionId = user?.company?.subscription?.id ?? user?.subscription?.id;
+  const subscriptionId = await subscriptionIdFor(userId);
   if (!subscriptionId) return;
 
   await prisma.subscription.update({
     where: { id: subscriptionId },
     data: kind === 'diagnosis' ? { diagnosesUsed: { increment: 1 } } : { photosUsed: { increment: 1 } },
   });
+}
+
+async function subscriptionIdFor(userId: string): Promise<string | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      subscription: { select: { id: true } },
+      company: { select: { subscription: { select: { id: true } } } },
+    },
+  });
+  return user?.company?.subscription?.id ?? user?.subscription?.id ?? null;
+}
+
+/**
+ * Claim one unit of a metered feature, atomically.
+ *
+ * Reading the count and then incrementing it is a race that six concurrent
+ * requests will win six times against a limit of five. The increment here is
+ * conditional in SQL — `WHERE diagnosesUsed < limit` — so the database decides,
+ * and the number of rows it updated tells us whether the claim succeeded.
+ *
+ * Returns true when the unit was claimed. Unlimited plans short-circuit.
+ */
+export async function claimUsage(
+  userId: string,
+  kind: 'diagnosis' | 'photo',
+): Promise<boolean> {
+  const entitlements = await getEntitlements(userId);
+  const remaining = kind === 'diagnosis' ? entitlements.diagnosesRemaining : entitlements.photosRemaining;
+  if (remaining === 'unlimited') return true;
+
+  const subscriptionId = await subscriptionIdFor(userId);
+  // No subscription row means nothing to meter against; the caller's
+  // entitlement check has already gated the feature itself.
+  if (!subscriptionId) return remaining > 0;
+
+  const plan = await prisma.subscription.findUnique({
+    where: { id: subscriptionId },
+    select: { plan: { select: { maxDiagnosesPerMonth: true, maxPhotosPerMonth: true } } },
+  });
+  const limit = kind === 'diagnosis'
+    ? plan?.plan.maxDiagnosesPerMonth ?? 0
+    : plan?.plan.maxPhotosPerMonth ?? 0;
+  if (limit < 0) return true;
+
+  const column = kind === 'diagnosis' ? 'diagnosesUsed' : 'photosUsed';
+  const updated = await prisma.$executeRawUnsafe(
+    `UPDATE "Subscription" SET "${column}" = "${column}" + 1 WHERE "id" = $1 AND "${column}" < $2`,
+    subscriptionId,
+    limit,
+  );
+  return updated > 0;
 }

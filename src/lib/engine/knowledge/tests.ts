@@ -656,14 +656,39 @@ export const TESTS: DiagnosticTest[] = [
       'blower_not_running',
     ],
     collects: ['last_completed_stage'],
+    // The sequence is cumulative: reaching a later stage proves every earlier
+    // stage happened. Each option therefore declares the FULL implied set.
+    // Anything a test yields but does not list is recorded as established
+    // ABSENT, so an incomplete list tells the engine the inducer never ran on a
+    // furnace whose burners just lit.
     options: [
       { value: 'nothing', label: 'Nothing happens at all', findings: ['inducer_not_running'] },
       { value: 'inducer_only', label: 'Inducer runs, then it stops there', findings: ['inducer_running', 'pressure_switch_not_closing'] },
-      { value: 'no_ignitor', label: 'Pressure switch closes, ignitor never glows', findings: ['inducer_running', 'ignitor_not_glowing'] },
-      { value: 'no_light', label: 'Ignitor glows, burners never light', findings: ['ignitor_glows', 'burners_not_lighting'] },
-      { value: 'drops_out', label: 'Burners light, then drop out after a few seconds', findings: ['burners_light', 'flame_drops_out'] },
-      { value: 'no_blower', label: 'Burners stay lit, blower never starts', findings: ['burners_light', 'blower_not_running'] },
-      { value: 'full_cycle', label: 'Full cycle completes normally', findings: ['inducer_running', 'ignitor_glows', 'burners_light', 'blower_running'] },
+      {
+        value: 'no_ignitor',
+        label: 'Pressure switch closes, ignitor never glows',
+        findings: ['inducer_running', 'ignitor_not_glowing'],
+      },
+      {
+        value: 'no_light',
+        label: 'Ignitor glows, burners never light',
+        findings: ['inducer_running', 'ignitor_glows', 'burners_not_lighting'],
+      },
+      {
+        value: 'drops_out',
+        label: 'Burners light, then drop out after a few seconds',
+        findings: ['inducer_running', 'ignitor_glows', 'burners_light', 'flame_drops_out'],
+      },
+      {
+        value: 'no_blower',
+        label: 'Burners stay lit, blower never starts',
+        findings: ['inducer_running', 'ignitor_glows', 'burners_light', 'blower_not_running'],
+      },
+      {
+        value: 'full_cycle',
+        label: 'Full cycle completes normally',
+        findings: ['inducer_running', 'ignitor_glows', 'burners_light', 'blower_running'],
+      },
     ],
     equipmentTypes: ['GAS_FURNACE', 'PACKAGE_UNIT', 'ROOFTOP_UNIT', 'DUAL_FUEL', 'BOILER'],
     costMinutes: 6,

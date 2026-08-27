@@ -40,17 +40,40 @@ export interface ExtractionResult {
   ambiguous: Array<{ text: string; why: string }>;
   warnings: string[];
   usedModel: boolean;
+  /**
+   * Set when the message used units the app does not work in. The model pass
+   * is skipped entirely in that case — otherwise the guarantee would be a
+   * prompt instruction rather than a property of the code.
+   */
+  unitRefusal?: boolean;
 }
 
-/** Build the alias index once — it is static. */
-const ALIAS_INDEX: Array<{ key: string; alias: string; unit: string | null }> = MEASUREMENTS.flatMap(
-  (m) => [
+/**
+ * Build the alias index once — it is static.
+ *
+ * Only NUMERIC measurements take part. Categorical fields (refrigerant,
+ * metering device, filter condition) are matched by their own named patterns;
+ * letting them into the "<alias> <number>" scan meant "inlet gas 7" set
+ * refrigerant to 7 and swallowed the actual gas-pressure reading.
+ */
+const ALIAS_INDEX: Array<{ key: string; alias: string; unit: string | null }> = MEASUREMENTS.filter(
+  (m) => m.kind === 'number',
+)
+  .flatMap((m) => [
     ...m.aliases.map((alias) => ({ key: m.key, alias: alias.toLowerCase(), unit: m.unit })),
     { key: m.key, alias: m.label.toLowerCase(), unit: m.unit },
-  ],
-).sort((a, b) => b.alias.length - a.alias.length); // longest alias wins
+  ])
+  .sort((a, b) => b.alias.length - a.alias.length); // longest alias wins
 
 const NUMBER = String.raw`(-?\d+(?:\.\d+)?)`;
+
+/**
+ * Units the app does not work in. Everything downstream assumes °F and psig,
+ * so a technician saying "12 celsius" must not be recorded as 12 °F — that is
+ * a 42-degree error straight into a superheat calculation.
+ */
+const FOREIGN_UNIT =
+  /(-?\d+(?:\.\d+)?)\s*(°?\s*c\b|celsius|centigrade|kpa\b|k\s?pa\b|bar\b|bars\b|mpa\b)/i;
 
 /**
  * Deterministic pass. Looks for `<alias> <number>` and `<number> <alias>`
@@ -60,7 +83,31 @@ export function extractDeterministic(input: string): ExtractionResult {
   const text = ' ' + input.toLowerCase().replace(/[,;]/g, ' , ').replace(/\s+/g, ' ') + ' ';
   const measurements: ExtractedMeasurement[] = [];
   const warnings: string[] = [];
+  const ambiguous: ExtractionResult['ambiguous'] = [];
   const claimed = new Set<string>();
+
+  const foreign = input.match(FOREIGN_UNIT);
+  if (foreign) {
+    // Refuse the whole pass rather than extract some readings correctly and
+    // one catastrophically wrong. The technician re-enters in °F/psig, or the
+    // structured form converts deliberately.
+    return {
+      measurements: [],
+      findings: [],
+      technicianOpinion: [],
+      ambiguous: [
+        {
+          text: foreign[0],
+          why: 'ThermoRivet works in °F and psig. Nothing was recorded from this message — re-enter the readings in °F and psig, or use the measurement form, so the conversion is deliberate rather than assumed.',
+        },
+      ],
+      warnings: [
+        `"${foreign[0].trim()}" is not in °F or psig. No readings were taken from that message.`,
+      ],
+      usedModel: false,
+      unitRefusal: true,
+    };
+  }
 
   // Refrigerant is a special case: it is named, not numbered.
   const refrigerantMatch = input.match(/\b(r[\s-]?(?:22|32|134a?|404a?|407c?|410a?|448a?|449a?|454b?))\b/i);
@@ -128,14 +175,7 @@ export function extractDeterministic(input: string): ExtractionResult {
     claimed.add(entry.key);
   }
 
-  return {
-    measurements,
-    findings: [],
-    technicianOpinion: [],
-    ambiguous: [],
-    warnings,
-    usedModel: false,
-  };
+  return { measurements, findings: [], technicianOpinion: [], ambiguous, warnings, usedModel: false };
 }
 
 const EXTRACT_TOOL = {
@@ -211,6 +251,10 @@ export async function extractStructured(
   options: ExtractOptions,
 ): Promise<ExtractionResult> {
   const deterministic = extractDeterministic(input);
+
+  // A unit refusal is final. Handing the message to the model here would let
+  // it record the Celsius value as Fahrenheit and undo the whole point.
+  if (deterministic.unitRefusal) return deterministic;
 
   // If the input is nothing but readings the parser already caught, skip the
   // model entirely.

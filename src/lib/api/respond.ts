@@ -7,6 +7,7 @@
  */
 
 import { NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { ZodError } from 'zod';
 import { AuthError } from '@/lib/auth/session';
 import { QuotaExceededError } from '@/lib/billing/entitlements';
@@ -65,6 +66,32 @@ export function handle<T extends unknown[], R extends Response = NextResponse>(
       }
       if (error instanceof PrismaMissingError) {
         return fail(error.message, 503, 'database_unavailable');
+      }
+
+      // Constraint failures are the client's problem to act on, not an
+      // internal fault. Returning them as 500 "something went wrong on our
+      // side" tells a technician nothing and hides a retryable condition.
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        switch (error.code) {
+          case 'P2002':
+            return fail(
+              'That conflicts with a record that already exists. Refresh and try again.',
+              409,
+              'conflict',
+            );
+          case 'P2025':
+            return fail('That record no longer exists.', 404, 'not_found');
+          case 'P2003':
+            return fail(
+              'That references something that does not exist, or that you do not have access to.',
+              400,
+              'invalid_reference',
+            );
+          case 'P2000':
+            return fail('One of those values is too long for the field it goes in.', 400, 'value_too_long');
+          default:
+            break;
+        }
       }
 
       // Anything else: log the detail, return something safe.

@@ -9,15 +9,20 @@ import {
   putObject,
 } from '@/lib/storage';
 import { analyzePhoto } from '@/lib/vision/analyze';
-import { assertCanAnalyzePhoto, recordUsage } from '@/lib/billing/entitlements';
+import { claimPhotoAnalysis } from '@/lib/billing/entitlements';
 import { decodeModel, decodedSummary } from '@/lib/decoder';
-import type { PhotoKind } from '@prisma/client';
+import { PhotoKind } from '@prisma/client';
+
+/** `kind` arrives from a multipart form, so it is untrusted input. */
+function asPhotoKind(value: unknown): PhotoKind | null {
+  return typeof value === 'string' && value in PhotoKind ? (value as PhotoKind) : null;
+}
 
 export const maxDuration = 60;
 
 export const POST = handle(async (request: NextRequest) => {
   const user = await requireUser();
-  await assertCanAnalyzePhoto(user.id);
+  await claimPhotoAnalysis(user.id);
 
   const form = await request.formData();
   const file = form.get('file');
@@ -40,7 +45,7 @@ export const POST = handle(async (request: NextRequest) => {
 
   const sessionId = (form.get('sessionId') as string | null) || null;
   const jobId = (form.get('jobId') as string | null) || null;
-  const intent = (form.get('kind') as PhotoKind | null) || null;
+  const intent = asPhotoKind(form.get('kind'));
 
   // A session id from the client is only honoured if it belongs to this user.
   let verifiedSessionId: string | null = null;
@@ -50,6 +55,24 @@ export const POST = handle(async (request: NextRequest) => {
       select: { id: true },
     });
     verifiedSessionId = owned?.id ?? null;
+  }
+
+  // Same for the job. Without this check a photo of one customer's equipment
+  // could be attached to another company's job by passing its id, and an
+  // unparseable id would surface as a foreign-key error rather than a refusal.
+  let verifiedJobId: string | null = null;
+  if (jobId) {
+    const owned = await prisma.job.findFirst({
+      where: {
+        id: jobId,
+        ...(user.companyId ? { companyId: user.companyId } : { userId: user.id }),
+      },
+      select: { id: true },
+    });
+    if (!owned) {
+      return fail('That job does not exist, or it belongs to another account.', 404, 'not_found');
+    }
+    verifiedJobId = owned.id;
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
@@ -70,7 +93,7 @@ export const POST = handle(async (request: NextRequest) => {
     data: {
       userId: user.id,
       sessionId: verifiedSessionId,
-      jobId,
+      jobId: verifiedJobId,
       storageKey: key,
       contentType: file.type,
       bytes: buffer.byteLength,
@@ -79,8 +102,6 @@ export const POST = handle(async (request: NextRequest) => {
       analyzedAt: new Date(),
     },
   });
-
-  await recordUsage(user.id, 'photo');
 
   // A legible model number is immediately worth decoding — that is the whole
   // point of photographing a rating plate.

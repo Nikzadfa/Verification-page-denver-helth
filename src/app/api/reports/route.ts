@@ -4,7 +4,7 @@ import { requireUser } from '@/lib/auth/session';
 import { assertCanUseReports } from '@/lib/billing/entitlements';
 import { reportSchema } from '@/lib/api/schemas';
 import { handle, notFound, ok } from '@/lib/api/respond';
-import { buildReportContent, nextReportNumber } from '@/lib/reports/build';
+import { buildReportContent, createReport } from '@/lib/reports/build';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,16 +63,13 @@ export const POST = handle(async (request: NextRequest) => {
           pdfGeneratedAt: null,
         },
       })
-    : await prisma.serviceReport.create({
-        data: {
-          userId: user.id,
-          jobId: session.jobId,
-          sessionId: session.id,
-          reportNumber: await nextReportNumber(),
-          content: content as unknown as object,
-          technicianNotes: body.technicianNotes ?? null,
-          status: body.finalize ? 'FINAL' : 'DRAFT',
-        },
+    : await createReport({
+        userId: user.id,
+        jobId: session.jobId,
+        sessionId: session.id,
+        content,
+        technicianNotes: body.technicianNotes ?? null,
+        finalize: body.finalize,
       });
 
   return ok({ report: { id: report.id, reportNumber: report.reportNumber, status: report.status }, content }, existing ? 200 : 201);

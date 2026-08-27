@@ -7,7 +7,7 @@
  * the diagnosis must survive the model being unavailable.
  */
 
-import type { EquipmentType } from '@prisma/client';
+import { Prisma, type EquipmentType } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import type { AuthenticatedUser } from '@/lib/auth/session';
 import {
@@ -31,7 +31,7 @@ import { resolveFaultCode } from '@/lib/faultcodes/resolve';
 import { retrieveForStep } from '@/lib/rag/retrieve';
 import { slugify } from '@/lib/rag/retrieve';
 import { checkForBypassRequest } from '@/lib/safety/hazards';
-import { assertCanStartDiagnosis, recordUsage } from '@/lib/billing/entitlements';
+import { claimDiagnosis } from '@/lib/billing/entitlements';
 import type { FaultCodeResolution } from '@/lib/faultcodes/types';
 
 const ALLOWED_FINDING_KEYS = FINDINGS.map((f) => f.key);
@@ -52,7 +52,7 @@ export interface StartSessionInput {
 }
 
 export async function startSession(user: AuthenticatedUser, input: StartSessionInput) {
-  await assertCanStartDiagnosis(user.id);
+  await claimDiagnosis(user.id);
 
   const families = classifyComplaint(input.complaint);
 
@@ -133,8 +133,6 @@ export async function startSession(user: AuthenticatedUser, input: StartSessionI
     },
   });
 
-  await recordUsage(user.id, 'diagnosis');
-
   const narration = await narrateAndStore(session.id, view, input.complaint, null, user.id);
 
   return { sessionId: session.id, view, narration, faultResolution };
@@ -181,7 +179,11 @@ async function persist(sessionId: string, view: EngineView) {
     data: {
       phase: view.state.phase,
       engineState: view.state as unknown as object,
-      conclusion: (view.conclusion as unknown as object) ?? undefined,
+      // Prisma reads `undefined` as "do not touch this column". Using it here
+      // left a retracted diagnosis in the row while confidence and completedAt
+      // were cleared, so a corrected reading produced a session that still
+      // claimed a conclusion the engine no longer held.
+      conclusion: (view.conclusion as unknown as Prisma.InputJsonValue) ?? Prisma.DbNull,
       confidence: view.conclusion?.confidence ?? null,
       ruledOut: view.conclusion?.ruledOut.map((r) => r.label) ?? [],
       completedAt: view.conclusion ? new Date() : null,

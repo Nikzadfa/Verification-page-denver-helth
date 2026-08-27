@@ -5,6 +5,7 @@
  * receives.
  */
 
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { evaluate } from '@/lib/engine/session';
 import type { EngineState } from '@/lib/engine/types';
@@ -12,7 +13,7 @@ import { TEST_MAP } from '@/lib/engine/knowledge/tests';
 import { measurementLabel, MEASUREMENT_MAP } from '@/lib/engine/measurements';
 import { getHazards } from '@/lib/safety/hazards';
 import { decodeModel, decodedSummary } from '@/lib/decoder';
-import { REPORT_DISCLAIMER, type ServiceReportContent, type ReportMeasurement } from './types';
+import { REPORT_DISCLAIMER, type ReportMeasurement, type ServiceReportContent } from './types';
 
 export async function buildReportContent(sessionId: string): Promise<ServiceReportContent> {
   const session = await prisma.diagnosticSession.findUniqueOrThrow({
@@ -160,8 +161,17 @@ export async function buildReportContent(sessionId: string): Promise<ServiceRepo
   };
 }
 
-/** Sequential, human-readable report number. */
-export async function nextReportNumber(): Promise<string> {
+/**
+ * Sequential, human-readable report number.
+ *
+ * Reading the maximum and adding one is a race: two technicians finishing a
+ * job in the same second both read the same maximum, and the second insert
+ * dies on the unique constraint with an error neither of them can act on.
+ * `createReport` therefore takes the allocation and the insert together and
+ * retries on collision, rather than handing out a number that may already be
+ * taken by the time it is used.
+ */
+async function peekNextReportNumber(): Promise<string> {
   const year = new Date().getFullYear();
   const prefix = `TR-${year}-`;
   const last = await prisma.serviceReport.findFirst({
@@ -171,4 +181,48 @@ export async function nextReportNumber(): Promise<string> {
   });
   const n = last ? Number(last.reportNumber.slice(prefix.length)) + 1 : 1;
   return `${prefix}${String(n).padStart(5, '0')}`;
+}
+
+/** Retained for callers that only need to display the next number. */
+export const nextReportNumber = peekNextReportNumber;
+
+export interface CreateReportInput {
+  userId: string;
+  jobId: string | null;
+  sessionId: string;
+  content: ServiceReportContent;
+  technicianNotes: string | null;
+  finalize: boolean;
+}
+
+export async function createReport(input: CreateReportInput) {
+  const MAX_ATTEMPTS = 6;
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+    const reportNumber = await peekNextReportNumber();
+    try {
+      return await prisma.serviceReport.create({
+        data: {
+          userId: input.userId,
+          jobId: input.jobId,
+          sessionId: input.sessionId,
+          reportNumber,
+          content: input.content as unknown as Prisma.InputJsonValue,
+          technicianNotes: input.technicianNotes,
+          status: input.finalize ? 'FINAL' : 'DRAFT',
+        },
+      });
+    } catch (error) {
+      const collision =
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002' &&
+        String(error.meta?.target ?? '').includes('reportNumber');
+      if (!collision) throw error;
+      // Another report took this number. Re-read and try the next one.
+    }
+  }
+
+  throw new Error(
+    'Could not allocate a report number after several attempts. Try again in a moment.',
+  );
 }

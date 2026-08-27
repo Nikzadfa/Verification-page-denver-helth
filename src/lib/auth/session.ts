@@ -15,7 +15,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { cookies } from 'next/headers';
 import bcrypt from 'bcryptjs';
-import { SignJWT, jwtVerify } from 'jose';
+import { SignJWT } from 'jose';
 import type { User, UserRole } from '@prisma/client';
 import { prisma } from '@/lib/db';
 
@@ -47,13 +47,6 @@ export async function hashPassword(plain: string): Promise<string> {
 
 export async function verifyPassword(plain: string, hash: string): Promise<boolean> {
   return bcrypt.compare(plain, hash);
-}
-
-export interface SessionPayload {
-  sub: string;
-  role: UserRole;
-  companyId: string | null;
-  jti: string;
 }
 
 export async function createSession(
@@ -186,26 +179,9 @@ export async function revokeCurrentSession(): Promise<void> {
   await clearSessionCookie();
 }
 
-/** Edge-safe check used by middleware. Does not touch the database. */
-export async function verifyJwtHalf(cookieValue: string): Promise<SessionPayload | null> {
-  const parts = cookieValue.split('.');
-  // `<opaque>.<header>.<payload>.<signature>`
-  if (parts.length < 4) return null;
-  const jwt = parts.slice(1).join('.');
-  try {
-    const { payload } = await jwtVerify(jwt, secretKey());
-    return {
-      sub: String(payload.sub),
-      role: payload.role as UserRole,
-      companyId: (payload.companyId as string | null) ?? null,
-      jti: String(payload.jti ?? ''),
-    };
-  } catch {
-    return null;
-  }
-}
-
 export const SESSION_COOKIE_NAME = COOKIE_NAME;
+// The edge-side verification of the JWT half lives in ./edge.ts, which imports
+// nothing that cannot run on the edge runtime.
 
 export class AuthError extends Error {
   constructor(

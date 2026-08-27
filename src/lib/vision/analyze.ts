@@ -13,7 +13,7 @@
 
 import { VISION_SYSTEM } from '@/lib/ai/prompts';
 import { callModel, isAiConfigured } from '@/lib/ai/provider';
-import type { PhotoKind } from '@prisma/client';
+import { PhotoKind } from '@prisma/client';
 
 export interface VisionField<T = string> {
   value: T | null;
@@ -176,6 +176,15 @@ export async function analyzePhoto(params: AnalyzePhotoParams): Promise<VisionRe
 }
 
 /**
+ * The model is asked for one of the PhotoKind values but is not bound to
+ * return one, and the value is written straight to a Postgres enum column.
+ * Anything unrecognised falls back rather than failing the whole upload.
+ */
+function asPhotoKind(value: unknown, fallback: PhotoKind): PhotoKind {
+  return typeof value === 'string' && value in PhotoKind ? (value as PhotoKind) : fallback;
+}
+
+/**
  * Defensive normalization. A field that claims a value while reporting
  * `legible: false` is contradictory, and the safe reading of a contradiction
  * is that the value is not trustworthy — so it is dropped.
@@ -200,7 +209,7 @@ function normalize(s: Partial<VisionResult>, intent: PhotoKind | null): VisionRe
   };
 
   const normalized: VisionResult = {
-    photoKind: (s.photoKind as PhotoKind) ?? intent ?? 'GENERAL',
+    photoKind: asPhotoKind(s.photoKind, intent ?? 'GENERAL'),
     manufacturer: field(s.manufacturer),
     modelNumber: field(s.modelNumber),
     serialNumber: field(s.serialNumber),
