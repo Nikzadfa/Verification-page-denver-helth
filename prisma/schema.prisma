@@ -1,0 +1,943 @@
+// ThermoRivet — data model
+//
+// Design notes
+// ------------
+// * Multi-tenant: every technician belongs to zero or one Company. Rows that a
+//   company can own carry `companyId` so a single index scan scopes a query to
+//   a tenant. Personal (PRO/FREE) users have companyId = null and are scoped by
+//   `userId` instead.
+// * The knowledge base uses pgvector. Prisma cannot type `vector`, so
+//   DocumentChunk.embedding is declared Unsupported and read/written with raw
+//   SQL in src/lib/rag/. The migration in prisma/migrations enables the
+//   extension and creates the HNSW index.
+// * Fault codes are deliberately NOT globally unique per manufacturer. The same
+//   printed code means different things on different control boards, so the
+//   uniqueness constraint includes the board/series scope.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector, pgcrypto]
+}
+
+// ---------------------------------------------------------------------------
+// Identity & tenancy
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  TECHNICIAN
+  COMPANY_ADMIN
+  PLATFORM_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+model User {
+  id           String     @id @default(uuid())
+  email        String     @unique
+  passwordHash String
+  fullName     String
+  phone        String?
+  role         UserRole   @default(TECHNICIAN)
+  status       UserStatus @default(ACTIVE)
+
+  // Trade profile — used to calibrate how much explanation the AI gives.
+  licenseNumber String?
+  yearsExp      Int?
+  epaCert       String? // Type I / II / III / Universal
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  lastSeenAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  authSessions       AuthSession[]
+  subscription       Subscription?
+  diagnosticSessions DiagnosticSession[]
+  jobs               Job[]
+  reports            ServiceReport[]
+  photos             Photo[]
+  uploadedDocuments  KnowledgeDocument[]
+  aiUsage            AiUsageEvent[]
+  auditLogs          AuditLog[]
+  supportTickets     SupportTicket[]
+  testRuns           EvalRun[]
+
+  @@index([companyId])
+  @@index([email])
+}
+
+model Company {
+  id       String  @id @default(uuid())
+  name     String
+  slug     String  @unique
+  phone    String?
+  address  String?
+  city     String?
+  state    String?
+  postal   String?
+  logoKey  String?
+  seatsMax Int     @default(5)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users        User[]
+  customers    Customer[]
+  jobs         Job[]
+  equipment    Equipment[]
+  documents    KnowledgeDocument[]
+  subscription Subscription?
+
+  @@index([slug])
+}
+
+model AuthSession {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  userAgent String?
+  ip        String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Field work: customers, jobs, equipment
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id        String  @id @default(uuid())
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  name    String
+  phone   String?
+  email   String?
+  address String?
+  city    String?
+  state   String?
+  postal  String?
+  notes   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  jobs      Job[]
+  equipment Equipment[]
+
+  @@index([companyId, name])
+}
+
+enum JobStatus {
+  OPEN
+  IN_PROGRESS
+  DIAGNOSED
+  COMPLETED
+  ARCHIVED
+}
+
+model Job {
+  id        String  @id @default(uuid())
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  equipmentId String?
+  equipment   Equipment? @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
+
+  jobNumber String?
+  title     String
+  complaint String?
+  status    JobStatus @default(OPEN)
+  siteNotes String?
+
+  scheduledFor DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  diagnosticSessions DiagnosticSession[]
+  reports            ServiceReport[]
+  photos             Photo[]
+
+  @@index([companyId, status])
+  @@index([userId, createdAt])
+}
+
+/// The families the diagnostic engine knows how to reason about. Adding a new
+/// family means adding hypotheses/tests in src/lib/engine/knowledge, not
+/// changing the schema.
+enum EquipmentType {
+  CENTRAL_AC
+  HEAT_PUMP
+  GAS_FURNACE
+  ELECTRIC_FURNACE
+  AIR_HANDLER
+  PACKAGE_UNIT
+  ROOFTOP_UNIT
+  MINI_SPLIT
+  DUCTLESS_MULTI
+  VRF
+  DUAL_FUEL
+  GEOTHERMAL
+  BOILER
+  HYDRONIC
+  COMMERCIAL_SPLIT
+  REFRIGERATION
+  WATER_HEATER
+  VENTILATION
+  UNKNOWN
+}
+
+model Equipment {
+  id        String  @id @default(uuid())
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  manufacturerId String?
+  manufacturer   Manufacturer? @relation(fields: [manufacturerId], references: [id], onDelete: SetNull)
+
+  equipmentModelId String?
+  equipmentModel   EquipmentModel? @relation(fields: [equipmentModelId], references: [id], onDelete: SetNull)
+
+  controlBoardId String?
+  controlBoard   ControlBoard? @relation(fields: [controlBoardId], references: [id], onDelete: SetNull)
+
+  type         EquipmentType @default(UNKNOWN)
+  modelNumber  String?
+  serialNumber String?
+  refrigerant  String?
+  nominalTons  Float?
+  voltage      String?
+  installedOn  DateTime?
+  location     String?
+
+  /// Output of the model-number decoder, including per-field confidence.
+  /// Shape: DecodedModel from src/lib/decoder/types.ts
+  decoded Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  jobs               Job[]
+  diagnosticSessions DiagnosticSession[]
+  photos             Photo[]
+
+  @@index([companyId])
+  @@index([manufacturerId, modelNumber])
+}
+
+// ---------------------------------------------------------------------------
+// Manufacturer knowledge: models, boards, fault codes, procedures
+// ---------------------------------------------------------------------------
+
+model Manufacturer {
+  id     String  @id @default(uuid())
+  name   String  @unique
+  slug   String  @unique
+  /// Brands that share engineering with this one (Carrier/Bryant, Trane/AmStd).
+  parent String?
+  notes  String?
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  models     EquipmentModel[]
+  boards     ControlBoard[]
+  faultCodes FaultCode[]
+  documents  KnowledgeDocument[]
+  equipment  Equipment[]
+  procedures DiagnosticProcedure[]
+
+  @@index([slug])
+}
+
+model EquipmentModel {
+  id             String       @id @default(uuid())
+  manufacturerId String
+  manufacturer   Manufacturer @relation(fields: [manufacturerId], references: [id], onDelete: Cascade)
+
+  /// Family prefix, e.g. "58MVC" or "24ACC6". Used to scope fault codes.
+  series      String
+  modelNumber String?
+  type        EquipmentType
+  description String?
+  refrigerant String?
+  stages      Int?
+  minYear     Int?
+  maxYear     Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  boards     ControlBoard[]
+  faultCodes FaultCode[]
+  equipment  Equipment[]
+
+  @@unique([manufacturerId, series, modelNumber])
+  @@index([manufacturerId, series])
+}
+
+/// A specific control/ignition board. The unit of fault-code meaning: the same
+/// printed number on two boards is frequently two different faults.
+model ControlBoard {
+  id             String       @id @default(uuid())
+  manufacturerId String
+  manufacturer   Manufacturer @relation(fields: [manufacturerId], references: [id], onDelete: Cascade)
+
+  equipmentModelId String?
+  equipmentModel   EquipmentModel? @relation(fields: [equipmentModelId], references: [id], onDelete: SetNull)
+
+  partNumber  String
+  aliases     String[] @default([])
+  description String?
+  /// LED_FLASH | SEVEN_SEGMENT | LED_COLOR | AMBER_GREEN | DISPLAY_TEXT
+  signalStyle String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  faultCodes FaultCode[]
+  equipment  Equipment[]
+
+  @@unique([manufacturerId, partNumber])
+  @@index([manufacturerId])
+}
+
+/// How trustworthy a knowledge row is. Anything not CONFIRMED is surfaced to
+/// the technician with a "verify against manufacturer documentation" banner and
+/// the AI is forbidden from asserting it as fact.
+enum VerificationStatus {
+  CONFIRMED /// Checked against a manufacturer document held in the KB.
+  PROVISIONAL /// Seeded from public service literature, not yet document-backed.
+  UNVERIFIED /// User/AI supplied. Never asserted without a caveat.
+  DISPUTED /// Conflicting sources; must ask for model/board.
+}
+
+model FaultCode {
+  id             String       @id @default(uuid())
+  manufacturerId String
+  manufacturer   Manufacturer @relation(fields: [manufacturerId], references: [id], onDelete: Cascade)
+
+  /// Optional narrowing. A row with both null applies to the whole brand and is
+  /// only used when nothing more specific matches — and is always returned with
+  /// a "confirm the model/board" prompt.
+  equipmentModelId String?
+  equipmentModel   EquipmentModel? @relation(fields: [equipmentModelId], references: [id], onDelete: Cascade)
+
+  controlBoardId String?
+  controlBoard   ControlBoard? @relation(fields: [controlBoardId], references: [id], onDelete: Cascade)
+
+  equipmentType EquipmentType @default(UNKNOWN)
+
+  /// Normalized lookup key: uppercase, no spaces/punctuation ("31", "E5", "1F").
+  code        String
+  /// What the tech actually sees ("3 short + 1 long flash", "31", "amber LED").
+  displayCode String?
+  title       String
+  meaning     String       @db.Text
+  triggerConditions String @db.Text
+  /// Ordered list of {cause, likelihood, note} — see src/lib/faultcodes/types.ts
+  possibleCauses Json
+  /// Safety hazard ids from src/lib/safety/hazards.ts
+  safetyIds   String[]     @default([])
+  /// Ordered diagnostic steps: {step, action, expected, ifPass, ifFail}
+  testSequence Json
+  repairNotes String?      @db.Text
+
+  verification VerificationStatus @default(PROVISIONAL)
+  sourceDocumentId String?
+  sourceDocument   KnowledgeDocument? @relation(fields: [sourceDocumentId], references: [id], onDelete: SetNull)
+  sourceCitation   String?
+
+  /// Hypothesis ids this code should boost in the inference engine.
+  linkedHypotheses String[] @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([manufacturerId, code, equipmentType, equipmentModelId, controlBoardId], name: "fault_code_scope")
+  @@index([manufacturerId, code])
+  @@index([code])
+}
+
+/// A reusable, ordered troubleshooting procedure (e.g. "Measure total external
+/// static pressure"). Referenced by tests in the engine and by fault codes.
+model DiagnosticProcedure {
+  id             String        @id @default(uuid())
+  manufacturerId String?
+  manufacturer   Manufacturer? @relation(fields: [manufacturerId], references: [id], onDelete: SetNull)
+
+  slug        String        @unique
+  title       String
+  category    String /// electrical | refrigeration | heating | airflow | controls | combustion
+  equipmentTypes EquipmentType[] @default([])
+  summary     String        @db.Text
+  /// [{ n, instruction, expected, tools[], caution? }]
+  steps       Json
+  toolsNeeded String[]      @default([])
+  safetyIds   String[]      @default([])
+  estMinutes  Int?
+  verification VerificationStatus @default(PROVISIONAL)
+  sourceCitation String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostic sessions — the core product
+// ---------------------------------------------------------------------------
+
+enum SessionPhase {
+  INTAKE /// Collecting the complaint and equipment identity
+  TRIAGE /// Engine choosing the first discriminating test
+  TESTING /// Running the observe -> analyze -> next-test loop
+  CONFIRMING /// One hypothesis leads; running a confirmation test
+  DIAGNOSED /// Conclusion reached and recorded
+  ABANDONED
+}
+
+model DiagnosticSession {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  jobId String?
+  job   Job?    @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  equipmentId String?
+  equipment   Equipment? @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
+
+  title         String
+  complaint     String        @db.Text
+  equipmentType EquipmentType @default(UNKNOWN)
+  refrigerant   String?
+  mode          String? /// cooling | heating | defrost | idle
+
+  phase SessionPhase @default(INTAKE)
+
+  /// Full engine state: hypothesis posteriors, findings, asked/answered tests,
+  /// ruled-out set. Shape: EngineState from src/lib/engine/types.ts.
+  /// Persisted so a session survives a page reload or a second technician.
+  engineState Json
+
+  /// Denormalized conclusion for list views and reports.
+  conclusion       Json?
+  confidence       Float?
+  ruledOut         String[] @default([])
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  messages     ConversationMessage[]
+  measurements Measurement[]
+  photos       Photo[]
+  reports      ServiceReport[]
+  usage        AiUsageEvent[]
+
+  @@index([userId, startedAt])
+  @@index([jobId])
+  @@index([phase])
+}
+
+enum MessageRole {
+  TECHNICIAN
+  ASSISTANT
+  SYSTEM
+  ENGINE /// Deterministic engine output (test prompts, analysis verdicts)
+}
+
+model ConversationMessage {
+  id        String            @id @default(uuid())
+  sessionId String
+  session   DiagnosticSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  role    MessageRole
+  content String      @db.Text
+
+  /// Structured payload rendered by the UI: engine step, citations, hazards,
+  /// extracted measurements, photo findings. Shape: MessagePayload.
+  payload Json?
+
+  /// Knowledge chunks used to answer, for the citation footer.
+  citations Json?
+
+  inputTokens  Int?
+  outputTokens Int?
+  latencyMs    Int?
+  model        String?
+
+  createdAt DateTime @default(now())
+
+  @@index([sessionId, createdAt])
+}
+
+/// One reading. `key` is an EvidenceKey (src/lib/engine/evidence.ts) so the
+/// engine can consume measurements without any string parsing at inference time.
+model Measurement {
+  id        String            @id @default(uuid())
+  sessionId String
+  session   DiagnosticSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  key      String
+  label    String
+  value    Float?
+  textValue String?
+  unit     String?
+  /// manual | voice | photo | calculated
+  source   String  @default("manual")
+  /// Set when the engine derived this from other readings (superheat, delta-T).
+  derivedFrom String[] @default([])
+  notes    String?
+
+  takenAt   DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([sessionId, key])
+}
+
+enum PhotoKind {
+  NAMEPLATE
+  CONTROL_BOARD
+  FAULT_DISPLAY
+  WIRING
+  COMPONENT
+  GAUGES
+  COIL
+  GENERAL
+}
+
+model Photo {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  sessionId String?
+  session   DiagnosticSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  jobId String?
+  job   Job?    @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  equipmentId String?
+  equipment   Equipment? @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
+
+  storageKey  String
+  contentType String
+  bytes       Int
+  width       Int?
+  height      Int?
+  kind        PhotoKind @default(GENERAL)
+  caption     String?
+
+  /// VisionResult (src/lib/vision/types.ts): every field carries a confidence
+  /// and a `legible` flag. Illegible fields are returned as null, never guessed.
+  analysis   Json?
+  analyzedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([userId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Service reports
+// ---------------------------------------------------------------------------
+
+enum ReportStatus {
+  DRAFT
+  FINAL
+}
+
+model ServiceReport {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  jobId String?
+  job   Job?    @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  sessionId String?
+  session   DiagnosticSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  reportNumber String       @unique
+  status       ReportStatus @default(DRAFT)
+
+  /// ServiceReportContent (src/lib/reports/types.ts) — complaint, equipment,
+  /// measurements table, tests performed, diagnosis, recommendation, parts.
+  content Json
+
+  technicianNotes String? @db.Text
+  pdfKey          String?
+  pdfGeneratedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([jobId])
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge base / RAG
+// ---------------------------------------------------------------------------
+
+enum DocumentType {
+  SERVICE_MANUAL
+  INSTALLATION_MANUAL
+  TROUBLESHOOTING_GUIDE
+  WIRING_DIAGRAM
+  TECHNICAL_BULLETIN
+  FAULT_CODE_SHEET
+  SPECIFICATION
+  TRAINING
+  OTHER
+}
+
+enum IngestStatus {
+  PENDING
+  EXTRACTING
+  CHUNKING
+  EMBEDDING
+  READY
+  FAILED
+}
+
+model KnowledgeDocument {
+  id String @id @default(uuid())
+
+  manufacturerId String?
+  manufacturer   Manufacturer? @relation(fields: [manufacturerId], references: [id], onDelete: SetNull)
+
+  /// Company-private documents. Null = platform-wide (visible to everyone).
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  uploadedById String?
+  uploadedBy   User?   @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  title          String
+  type           DocumentType @default(OTHER)
+  equipmentTypes EquipmentType[] @default([])
+  modelSeries    String[]     @default([])
+  publication    String? /// Manufacturer's own doc number, e.g. "58MVC-01SM"
+  revision       String?
+  year           Int?
+
+  storageKey  String?
+  sourceUrl   String?
+  pageCount   Int?
+  bytes       Int?
+  checksum    String?
+
+  status      IngestStatus @default(PENDING)
+  statusError String?
+  chunkCount  Int          @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  chunks     DocumentChunk[]
+  faultCodes FaultCode[]
+
+  @@index([manufacturerId, type])
+  @@index([companyId])
+  @@index([status])
+}
+
+model DocumentChunk {
+  id         String            @id @default(uuid())
+  documentId String
+  document   KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  ordinal   Int
+  page      Int?
+  section   String?
+  content   String @db.Text
+  tokens    Int?
+
+  /// Copied from the parent for single-index filtered vector search.
+  manufacturerId String?
+  companyId      String?
+  equipmentTypes EquipmentType[] @default([])
+
+  /// pgvector column. Written/read via raw SQL — see src/lib/rag/store.ts.
+  embedding Unsupported("vector(1024)")?
+
+  createdAt DateTime @default(now())
+
+  @@unique([documentId, ordinal])
+  @@index([documentId])
+  @@index([manufacturerId])
+}
+
+// ---------------------------------------------------------------------------
+// Billing
+// ---------------------------------------------------------------------------
+
+enum PlanTier {
+  FREE
+  PRO
+  COMPANY
+}
+
+/// Pricing and entitlements live in the database so the admin dashboard can
+/// change them without a deploy. Stripe price ids are attached per plan.
+model Plan {
+  id   String   @id @default(uuid())
+  tier PlanTier @unique
+  name String
+  description String?
+
+  priceCentsMonthly Int
+  priceCentsYearly  Int?
+  currency          String @default("usd")
+
+  stripeProductId     String?
+  stripePriceIdMonthly String?
+  stripePriceIdYearly  String?
+
+  /// Entitlements. -1 means unlimited.
+  maxDiagnosesPerMonth Int     @default(-1)
+  maxPhotosPerMonth    Int     @default(-1)
+  maxSeats             Int     @default(1)
+  faultCodeLookup      Boolean @default(true)
+  photoAnalysis        Boolean @default(false)
+  savedJobs            Boolean @default(false)
+  serviceReports       Boolean @default(false)
+  companyDashboard     Boolean @default(false)
+  sharedKnowledge      Boolean @default(false)
+  prioritySupport      Boolean @default(false)
+
+  featureBullets String[] @default([])
+  active         Boolean  @default(true)
+  sortOrder      Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptions Subscription[]
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+}
+
+model Subscription {
+  id String @id @default(uuid())
+
+  /// Exactly one of userId / companyId is set.
+  userId String? @unique
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  companyId String? @unique
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  planId String
+  plan   Plan   @relation(fields: [planId], references: [id])
+
+  status SubscriptionStatus @default(ACTIVE)
+
+  stripeCustomerId     String?
+  stripeSubscriptionId String? @unique
+
+  currentPeriodStart DateTime @default(now())
+  currentPeriodEnd   DateTime?
+  cancelAtPeriodEnd  Boolean  @default(false)
+
+  /// Rolling counters, reset when currentPeriodStart rolls over.
+  diagnosesUsed Int @default(0)
+  photosUsed    Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Observability, support, evaluation
+// ---------------------------------------------------------------------------
+
+model AiUsageEvent {
+  id     String @id @default(uuid())
+  userId String?
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  sessionId String?
+  session   DiagnosticSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  /// diagnose | extract | vision | rag | narrate | eval | decode
+  operation    String
+  model        String
+  inputTokens  Int    @default(0)
+  outputTokens Int    @default(0)
+  costCents    Float  @default(0)
+  latencyMs    Int    @default(0)
+  ok           Boolean @default(true)
+  error        String?
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([operation, createdAt])
+}
+
+model AuditLog {
+  id     String  @id @default(uuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  action     String
+  entityType String
+  entityId   String?
+  before     Json?
+  after      Json?
+  ip         String?
+
+  createdAt DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+enum TicketStatus {
+  OPEN
+  PENDING
+  RESOLVED
+  CLOSED
+}
+
+model SupportTicket {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  subject  String
+  body     String       @db.Text
+  status   TicketStatus @default(OPEN)
+  priority String       @default("normal")
+  response String?      @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// AI Testing Center
+// ---------------------------------------------------------------------------
+
+/// A stored scenario the platform admin can replay against the current engine +
+/// prompt + knowledge base. Assertions are graded mechanically wherever
+/// possible (engine picked test X, hypothesis Y ranked first, no premature
+/// conclusion) and only fall back to an LLM judge for prose quality.
+model EvalCase {
+  id   String @id @default(uuid())
+  slug String @unique
+  name String
+  /// fault_code | symptom | measurement | photo | safety | refusal
+  category String
+  tags     String[] @default([])
+
+  /// EvalScenario (src/lib/eval/types.ts): the opening complaint, equipment
+  /// identity, and a scripted set of technician replies keyed by what the
+  /// engine asks for.
+  scenario Json
+  /// EvalExpectation[]: machine-checkable assertions.
+  expectations Json
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  results EvalResult[]
+}
+
+model EvalRun {
+  id     String @id @default(uuid())
+  userId String?
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  label       String
+  model       String
+  engineVersion String
+  promptVersion String
+
+  totalCases  Int   @default(0)
+  passedCases Int   @default(0)
+  score       Float @default(0)
+  durationMs  Int   @default(0)
+
+  createdAt DateTime @default(now())
+
+  results EvalResult[]
+
+  @@index([createdAt])
+}
+
+model EvalResult {
+  id     String   @id @default(uuid())
+  runId  String
+  run    EvalRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  caseId String
+  case   EvalCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  passed Boolean
+  score  Float   @default(0)
+  /// EvalCheck[] — one row per assertion with pass/fail and the observed value.
+  checks Json
+  /// Full replayed transcript for inspection in the admin UI.
+  transcript Json
+  error      String?
+
+  durationMs Int @default(0)
+  createdAt  DateTime @default(now())
+
+  @@unique([runId, caseId])
+  @@index([caseId, createdAt])
+}
+
+/// Editable application settings (pricing overrides, AI toggles, banner text)
+/// so the admin dashboard does not require redeploys.
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
