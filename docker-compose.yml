@@ -1,0 +1,28 @@
+# PostgreSQL with pgvector, which is the only external service ThermoRivet
+# needs to run. Everything else (AI, Stripe, S3) is optional and degrades with
+# a clear message when unconfigured.
+#
+#   docker compose up -d
+#
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: thermorivet-db
+    environment:
+      POSTGRES_USER: thermorivet
+      POSTGRES_PASSWORD: thermorivet
+      POSTGRES_DB: thermorivet
+    ports:
+      - '5432:5432'
+    volumes:
+      - thermorivet-data:/var/lib/postgresql/data
+    healthcheck:
+      # `npm run setup` waits on this, so it must report ready only when the
+      # server actually accepts connections.
+      test: ['CMD-SHELL', 'pg_isready -U thermorivet -d thermorivet']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  thermorivet-data:

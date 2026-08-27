@@ -2,7 +2,7 @@
   "name": "thermorivet",
   "version": "0.1.0",
   "private": true,
-  "description": "ThermoRivet — AI diagnostic assistant for HVAC technicians",
+  "description": "ThermoRivet \u2014 AI diagnostic assistant for HVAC technicians",
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
@@ -15,7 +15,11 @@
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "setup": "node scripts/setup.mjs",
+    "db:demo": "tsx prisma/seed/demo.ts",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
