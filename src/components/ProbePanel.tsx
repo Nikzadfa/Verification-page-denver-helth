@@ -448,9 +448,17 @@ function ChannelRow({
           </option>
         ))}
       </select>
-      {channel.measurementLabel && (
+      {channel.measurementLabel ? (
         <p className="mt-1 text-xs" style={{ color: 'var(--text-dim)' }}>
           Feeds {channel.measurementLabel}
+        </p>
+      ) : (
+        // Said on the row itself, not only in the skipped list. With a
+        // simulated set every channel is refused for being simulated, so the
+        // assignment guidance would otherwise never be visible while trying
+        // the feature out — which is exactly when it is being learned.
+        <p className="mt-1 text-xs" style={{ color: 'var(--color-warn-400)' }}>
+          Say where this one is clamped and it will feed the diagnosis.
         </p>
       )}
     </div>
