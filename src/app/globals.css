@@ -1,0 +1,516 @@
+@import 'tailwindcss';
+
+/*
+ * ThermoRivet design system.
+ *
+ * Built for a phone held in a gloved hand in a mechanical room or on a roof.
+ * Three constraints drive everything here:
+ *
+ *  1. TOUCH TARGETS. Nothing interactive is under 48px tall. A technician
+ *     wearing gloves cannot hit a 32px button, and a mis-tap during a
+ *     diagnosis costs real time.
+ *
+ *  2. CONTRAST. Sunlight on a roof and a dark attic are both normal working
+ *     conditions. Dark mode is the default because most service work happens
+ *     in dark spaces, and the light theme is tuned for direct sun rather than
+ *     for an office.
+ *
+ *  3. SEVERITY IS NEVER COLOUR ALONE. Every status carries a label or an icon
+ *     as well as a colour — roughly one in twelve men has a colour vision
+ *     deficiency, and this trade is overwhelmingly male.
+ */
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, monospace;
+
+  /* Steel and copper: the palette of the trade. */
+  --color-steel-50: #f4f6f8;
+  --color-steel-100: #e6eaef;
+  --color-steel-200: #ccd5de;
+  --color-steel-300: #a4b3c2;
+  --color-steel-400: #748a9f;
+  --color-steel-500: #526b83;
+  --color-steel-600: #3e5468;
+  --color-steel-700: #324352;
+  --color-steel-800: #202d38;
+  --color-steel-900: #141d25;
+  --color-steel-950: #0b1116;
+
+  --color-copper-400: #e08a4a;
+  --color-copper-500: #cf6f2c;
+  --color-copper-600: #ad5620;
+
+  --color-cool-400: #38bdf8;
+  --color-cool-500: #0ea5e9;
+  --color-cool-600: #0284c7;
+
+  --color-heat-400: #fb923c;
+  --color-heat-500: #f97316;
+
+  --color-alert-400: #f87171;
+  --color-alert-500: #ef4444;
+  --color-alert-600: #dc2626;
+
+  --color-warn-400: #fbbf24;
+  --color-warn-500: #f59e0b;
+
+  --color-good-400: #34d399;
+  --color-good-500: #10b981;
+}
+
+:root {
+  --bg: var(--color-steel-950);
+  --bg-raised: var(--color-steel-900);
+  --bg-inset: #070d11;
+  --border: #1e2c37;
+  --border-strong: #2c3f4e;
+  --text: #e8eef4;
+  --text-muted: #93a6b6;
+  --text-dim: #6a8093;
+  --accent: var(--color-cool-400);
+  --accent-ink: #04202e;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    --bg: #f7f9fb;
+    --bg-raised: #ffffff;
+    --bg-inset: #eef2f6;
+    --border: #d9e2ea;
+    --border-strong: #b9c8d6;
+    --text: #101a21;
+    --text-muted: #4a5f70;
+    --text-dim: #6b8092;
+    --accent: var(--color-cool-600);
+    --accent-ink: #ffffff;
+    color-scheme: light;
+  }
+}
+
+:root[data-theme='light'] {
+  --bg: #f7f9fb;
+  --bg-raised: #ffffff;
+  --bg-inset: #eef2f6;
+  --border: #d9e2ea;
+  --border-strong: #b9c8d6;
+  --text: #101a21;
+  --text-muted: #4a5f70;
+  --text-dim: #6b8092;
+  --accent: var(--color-cool-600);
+  --accent-ink: #ffffff;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --bg: var(--color-steel-950);
+  --bg-raised: var(--color-steel-900);
+  --bg-inset: #070d11;
+  --border: #1e2c37;
+  --border-strong: #2c3f4e;
+  --text: #e8eef4;
+  --text-muted: #93a6b6;
+  --text-dim: #6a8093;
+  --accent: var(--color-cool-400);
+  --accent-ink: #04202e;
+  color-scheme: dark;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  /* Prevents iOS from silently scaling up text in landscape. */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  min-height: 100dvh;
+  /* Respects the notch and the home indicator without a library. */
+  padding-bottom: env(safe-area-inset-bottom);
+  overscroll-behavior-y: none;
+}
+
+/* Inputs at 16px or larger, because iOS Safari zooms the viewport on focus
+   for anything smaller and the technician then has to pinch back out. */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@layer components {
+  .tr-card {
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 0.875rem;
+  }
+
+  .tr-input {
+    width: 100%;
+    min-height: 3rem;
+    background: var(--bg-inset);
+    border: 1px solid var(--border-strong);
+    border-radius: 0.625rem;
+    padding: 0.625rem 0.875rem;
+    color: var(--text);
+  }
+  .tr-input::placeholder {
+    color: var(--text-dim);
+  }
+
+  .tr-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 3rem;
+    padding: 0.75rem 1.25rem;
+    border-radius: 0.625rem;
+    font-weight: 600;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: filter 120ms ease, opacity 120ms ease;
+  }
+  .tr-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .tr-btn:not(:disabled):active {
+    filter: brightness(0.92);
+  }
+
+  .tr-btn-primary {
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+
+  .tr-btn-secondary {
+    background: var(--bg-inset);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+  }
+
+  .tr-btn-ghost {
+    background: transparent;
+    color: var(--text-muted);
+  }
+
+  /* The primary field action: a big, unmissable choice button. */
+  .tr-choice {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 3.5rem;
+    text-align: left;
+    padding: 0.875rem 1rem;
+    background: var(--bg-inset);
+    border: 1px solid var(--border-strong);
+    border-radius: 0.75rem;
+    color: var(--text);
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .tr-choice:not(:disabled):hover {
+    border-color: var(--accent);
+  }
+  .tr-choice:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .tr-label {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 0.375rem;
+  }
+
+  .tr-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    border: 1px solid;
+  }
+}
+
+/* Severity. Text label plus colour, never colour alone. */
+.sev-NORMAL {
+  color: var(--color-good-400);
+  border-color: color-mix(in srgb, var(--color-good-500) 45%, transparent);
+  background: color-mix(in srgb, var(--color-good-500) 12%, transparent);
+}
+.sev-WATCH {
+  color: var(--color-warn-400);
+  border-color: color-mix(in srgb, var(--color-warn-500) 45%, transparent);
+  background: color-mix(in srgb, var(--color-warn-500) 12%, transparent);
+}
+.sev-ABNORMAL,
+.sev-SERIOUS {
+  color: var(--color-heat-400);
+  border-color: color-mix(in srgb, var(--color-heat-500) 45%, transparent);
+  background: color-mix(in srgb, var(--color-heat-500) 12%, transparent);
+}
+.sev-CRITICAL,
+.sev-LETHAL {
+  color: var(--color-alert-400);
+  border-color: color-mix(in srgb, var(--color-alert-500) 55%, transparent);
+  background: color-mix(in srgb, var(--color-alert-500) 14%, transparent);
+}
+.sev-INFO,
+.sev-CAUTION {
+  color: var(--text-muted);
+  border-color: var(--border-strong);
+  background: var(--bg-inset);
+}
+
+/* The hazard banner must be impossible to scroll past without noticing. */
+.hazard-LETHAL {
+  border-left: 4px solid var(--color-alert-500);
+  background: color-mix(in srgb, var(--color-alert-500) 10%, var(--bg-raised));
+}
+.hazard-SERIOUS {
+  border-left: 4px solid var(--color-heat-500);
+  background: color-mix(in srgb, var(--color-heat-500) 8%, var(--bg-raised));
+}
+.hazard-CAUTION {
+  border-left: 4px solid var(--color-warn-500);
+  background: color-mix(in srgb, var(--color-warn-500) 7%, var(--bg-raised));
+}
+
+.tr-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+/* Respect a technician's reduced-motion setting; nothing here is decorative
+   enough to justify overriding it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes tr-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+.tr-pulse {
+  animation: tr-pulse 1.4s ease-in-out infinite;
+}
+
+/* ---------------------------------------------------------------------------
+ * App shell
+ *
+ * Bottom bar on a phone, left rail from tablet width up. The bar is where a
+ * thumb reaches when the other hand is on a meter; on a wide screen the same
+ * bar would sit as far from the content as the display allows, so it moves.
+ * ------------------------------------------------------------------------- */
+
+.tr-skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.75rem 1rem;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+  border-radius: 0 0 0.5rem 0;
+}
+.tr-skip:focus {
+  left: 0;
+}
+
+.tr-shell {
+  padding-bottom: calc(4.25rem + env(safe-area-inset-bottom));
+}
+.tr-shell:focus {
+  outline: none;
+}
+
+.tr-nav {
+  position: fixed;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bg-raised);
+  border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.tr-nav-list {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tr-nav-link {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  /* Above the 48px floor even before the safe-area inset is added. */
+  min-height: 3.5rem;
+  padding: 0.4rem 0.25rem;
+  color: var(--text-dim);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.tr-nav-link[data-active='true'] {
+  color: var(--accent);
+}
+
+/* State is not carried by colour alone: the active tab also gets a rule. */
+.tr-nav-link[data-active='true']::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1.75rem;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.tr-nav-icon {
+  font-size: 1.125rem;
+  line-height: 1;
+}
+
+.tr-nav-item {
+  position: relative;
+}
+
+@media (min-width: 768px) {
+  .tr-nav {
+    top: 0;
+    right: auto;
+    bottom: 0;
+    width: 12rem;
+    border-top: 0;
+    border-right: 1px solid var(--border);
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .tr-nav-list {
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
+    padding: 0.75rem 0.5rem;
+    gap: 0.25rem;
+  }
+
+  .tr-nav-link {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 0.75rem;
+    min-height: 3rem;
+    padding: 0.5rem 0.875rem;
+    border-radius: 0.625rem;
+    font-size: 0.9375rem;
+    text-align: left;
+  }
+
+  .tr-nav-link[data-active='true'] {
+    background: var(--bg-inset);
+  }
+
+  .tr-nav-link[data-active='true']::before {
+    top: 50%;
+    left: 0;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 1.25rem;
+  }
+
+  .tr-nav-icon {
+    font-size: 1.25rem;
+  }
+
+  .tr-shell {
+    padding-left: 12rem;
+    padding-bottom: 0;
+  }
+}
+
+/* Long-form legal and support copy. Measure kept near 65 characters. */
+.tr-prose {
+  max-width: 38rem;
+  line-height: 1.65;
+}
+.tr-prose h1 {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.tr-prose h2 {
+  margin-top: 2rem;
+  font-size: 1.0625rem;
+  font-weight: 700;
+}
+.tr-prose p,
+.tr-prose ul,
+.tr-prose ol {
+  margin-top: 0.75rem;
+  color: var(--text-muted);
+}
+.tr-prose ul,
+.tr-prose ol {
+  padding-left: 1.25rem;
+}
+.tr-prose li {
+  margin-top: 0.35rem;
+}
+.tr-prose li::marker {
+  color: var(--text-dim);
+}
+.tr-prose strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.tr-prose a {
+  color: var(--accent);
+  text-underline-offset: 3px;
+  text-decoration: underline;
+}
+.tr-prose .tr-updated {
+  font-size: 0.8125rem;
+  color: var(--text-dim);
+  margin-top: 0.25rem;
+}
