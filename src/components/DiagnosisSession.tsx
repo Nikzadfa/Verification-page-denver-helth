@@ -14,6 +14,7 @@ import {
   api,
 } from '@/components/ui';
 import { MeasurementForm } from '@/components/MeasurementForm';
+import { ProbePanel } from '@/components/ProbePanel';
 import { VoiceInput } from '@/components/VoiceInput';
 
 export interface SessionMessage {
@@ -28,16 +29,19 @@ interface Props {
   sessionId: string;
   title: string;
   complaint: string;
+  /** Needed for the P/T curve behind live superheat and subcooling. */
+  refrigerant: string | null;
   initialMessages: SessionMessage[];
   initialView: SerializedView;
 }
 
-type Tab = 'step' | 'ranking' | 'readings';
+type Tab = 'step' | 'ranking' | 'readings' | 'gauges';
 
 export function DiagnosisSession({
   sessionId,
   title,
   complaint,
+  refrigerant,
   initialMessages,
   initialView,
 }: Props) {
@@ -136,6 +140,7 @@ export function DiagnosisSession({
             ['step', conclusion ? 'Diagnosis' : 'Next step', null],
             ['ranking', 'Causes', view.ranked.length],
             ['readings', 'Readings', view.derived.length],
+            ['gauges', 'Gauges', null],
           ] as Array<[Tab, string, number | null]>
         ).map(([key, label, count]) => (
           <button
@@ -261,6 +266,24 @@ export function DiagnosisSession({
 
         {tab === 'ranking' && <RankingPanel view={view} />}
         {tab === 'readings' && <ReadingsPanel view={view} />}
+
+        {tab === 'gauges' && (
+          <ProbePanel
+            refrigerant={refrigerant}
+            busy={busy}
+            onCapture={async (readings) => {
+              // Straight into the same path a typed reading takes, carrying
+              // source: 'probe' so the record says where the number came from.
+              await post(
+                'measurements',
+                { testId: next?.id ?? null, readings },
+                `From wireless probes — ${readings
+                  .map((r) => `${r.key} ${r.value}${r.unit ? ` ${r.unit}` : ''}`)
+                  .join(', ')}`,
+              );
+            }}
+          />
+        )}
       </main>
 
       <div ref={bottom} />

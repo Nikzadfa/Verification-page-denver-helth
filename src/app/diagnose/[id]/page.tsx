@@ -34,6 +34,7 @@ export default async function DiagnosePage({ params }: { params: Promise<{ id: s
         sessionId={loaded.session.id}
         title={loaded.session.title}
         complaint={loaded.session.complaint}
+        refrigerant={loaded.session.refrigerant}
         initialMessages={messages}
         initialView={serializeView(loaded.view)}
       />

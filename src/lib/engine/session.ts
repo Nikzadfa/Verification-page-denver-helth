@@ -54,7 +54,7 @@ export interface RecordMeasurementInput {
   value?: number | null;
   text?: string | null;
   unit?: string | null;
-  source?: 'manual' | 'voice' | 'photo' | 'calculated';
+  source?: 'manual' | 'voice' | 'photo' | 'probe' | 'calculated';
 }
 
 export function recordMeasurements(

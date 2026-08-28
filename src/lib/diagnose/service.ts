@@ -402,7 +402,14 @@ export async function answerTest(
 export async function submitMeasurements(
   user: AuthenticatedUser,
   sessionId: string,
-  readings: Array<{ key: string; value?: number | null; text?: string | null; unit?: string | null }>,
+  readings: Array<{
+    key: string;
+    value?: number | null;
+    text?: string | null;
+    unit?: string | null;
+    source?: 'manual' | 'voice' | 'probe';
+    note?: string | null;
+  }>,
   testId?: string | null,
 ) {
   const loaded = await loadSession(user, sessionId);
@@ -413,7 +420,8 @@ export async function submitMeasurements(
     value: r.value ?? null,
     text: r.text ?? null,
     unit: r.unit ?? MEASUREMENT_MAP[r.key]?.unit ?? null,
-    source: 'manual' as const,
+    source: r.source ?? 'manual',
+    note: r.note ?? null,
   }));
 
   let { state, warnings } = recordMeasurements(
@@ -427,9 +435,15 @@ export async function submitMeasurements(
   const summary = inputs
     .map((i) => `${measurementLabel(i.key)}: ${i.value ?? i.text}${i.unit ? ` ${i.unit}` : ''}`)
     .join(', ');
+  const fromProbe = inputs.some((i) => i.source === 'probe');
 
   await prisma.conversationMessage.create({
-    data: { sessionId, role: 'TECHNICIAN', content: summary, payload: { testId, readings: inputs } },
+    data: {
+      sessionId,
+      role: 'TECHNICIAN',
+      content: fromProbe ? `From wireless probes — ${summary}` : summary,
+      payload: { testId, readings: inputs },
+    },
   });
 
   const view = evaluate(state);
@@ -474,7 +488,14 @@ export async function skipTest(
 
 async function persistMeasurements(
   sessionId: string,
-  inputs: Array<{ key: string; value: number | null; text: string | null; unit: string | null; source: string }>,
+  inputs: Array<{
+    key: string;
+    value: number | null;
+    text: string | null;
+    unit: string | null;
+    source: string;
+    note?: string | null;
+  }>,
 ) {
   for (const i of inputs) {
     await prisma.measurement.create({
@@ -486,6 +507,7 @@ async function persistMeasurements(
         textValue: i.text,
         unit: i.unit,
         source: i.source,
+        notes: i.note ?? null,
       },
     });
   }

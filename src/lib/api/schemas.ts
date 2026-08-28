@@ -66,6 +66,14 @@ export const measurementsSchema = z.object({
         value: z.number().finite().nullish(),
         text: z.string().max(120).nullish(),
         unit: z.string().max(20).nullish(),
+        /**
+         * Where the number came from. A reading off a wireless probe is not a
+         * typed one and is not recorded as one — the service report says which
+         * it was, because that is part of how defensible the reading is.
+         */
+        source: z.enum(['manual', 'voice', 'probe']).default('manual'),
+        /** Which probe, for a probe reading. */
+        note: z.string().max(160).nullish(),
       }),
     )
     .min(1)

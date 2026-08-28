@@ -525,7 +525,10 @@ model Measurement {
   value    Float?
   textValue String?
   unit     String?
-  /// manual | voice | photo | calculated
+  /// manual | voice | photo | probe | calculated
+  /// `probe` is a reading taken straight off a wireless gauge rather than
+  /// typed, which is worth keeping: it is a stronger reading than a
+  /// transcribed one, and the service report says which it was.
   source   String  @default("manual")
   /// Set when the engine derived this from other readings (superheat, delta-T).
   derivedFrom String[] @default([])
